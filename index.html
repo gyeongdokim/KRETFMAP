@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>한국 ETF 마켓맵</title>
+<meta name="description" content="한국 상장 ETF 전체를 순자산 크기로 펼치고 수익률, 설정·환매 자금흐름, 괴리율로 색칠한 일별 마켓맵입니다.">
+<!-- 링크드인 미리보기 카드: 배포 후 og:url, og:image를 실제 주소로 바꾸세요 (이미지 권장 1200×627) -->
+<meta property="og:type" content="website">
+<meta property="og:title" content="한국 ETF 마켓맵">
+<meta property="og:description" content="수익률, 설정·환매 자금흐름, 괴리율로 보는 한국 ETF 시장 전체.">
+<meta property="og:image" content="https://YOUR-DOMAIN/og/map.png">
+<meta property="og:url" content="https://YOUR-DOMAIN/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<style>
+:root{
+  --paper:#EEF1F4; --surface:#FFFFFF; --ink:#14213D; --muted:#5B6478; --line:#CCD3DD;
+  --neutral:#D3D8E0; --na:#E4E7EC; --up:#C8102E; --down:#1F5FBF; --focus:#D99A00; --banner:#FFF4D6;
+  color-scheme:light;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --paper:#0F1724; --surface:#172234; --ink:#E6EBF2; --muted:#98A3B5; --line:#2A374C;
+    --neutral:#334157; --na:#222D40; --up:#F0475E; --down:#4C8EF0; --focus:#F2B630; --banner:#3A2F12;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0F1724; --surface:#172234; --ink:#E6EBF2; --muted:#98A3B5; --line:#2A374C;
+  --neutral:#334157; --na:#222D40; --up:#F0475E; --down:#4C8EF0; --focus:#F2B630; --banner:#3A2F12;
+  color-scheme:dark;
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans KR",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px; line-height:1.55; -webkit-font-smoothing:antialiased;
+}
+.num{font-variant-numeric:tabular-nums}
+main{max-width:1280px; margin:0 auto; padding:20px 20px 64px}
+:focus-visible{outline:3px solid var(--focus); outline-offset:2px}
+
+header{display:flex; flex-wrap:wrap; justify-content:space-between; align-items:flex-end; gap:12px 24px; margin-bottom:14px}
+h1{font-size:clamp(26px,4vw,36px); line-height:1.15; margin:0; letter-spacing:-0.025em}
+.asof{color:var(--muted); font-size:14px; margin:4px 0 0}
+.banner{background:var(--banner); padding:8px 12px; border-radius:6px; font-size:13px; margin-bottom:12px}
+
+.seg{display:inline-flex; border:1px solid var(--ink); border-radius:8px; overflow:hidden}
+.seg button{font:inherit; font-size:14px; font-weight:500; padding:8px 14px; border:0; background:transparent; color:var(--ink); cursor:pointer}
+.seg button+button{border-left:1px solid var(--ink)}
+.seg button[aria-pressed="true"]{background:var(--ink); color:var(--paper)}
+.seg button:disabled{color:var(--muted); cursor:default}
+.seg.small button{font-size:13px; padding:5px 10px}
+
+.legend{display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted); margin:10px 0 8px}
+.legend .ramp{width:220px; height:10px; border-radius:2px; flex:none}
+.legend > span{white-space:nowrap}
+@media (max-width:520px){ .legend{flex-wrap:wrap} .legend .ramp{width:120px} }
+.legend .note{margin-left:auto}
+
+#map{position:relative; width:100%; height:clamp(440px,66vh,760px); background:var(--paper); user-select:none}
+.cat{position:absolute; pointer-events:none}
+.cat span{display:block; font-size:12px; font-weight:700; line-height:20px; padding:0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.cat em{font-style:normal; font-weight:400; color:var(--muted)}
+.tile{position:absolute; overflow:hidden; cursor:pointer; padding:3px 5px; line-height:1.25; transition:filter .1s}
+.tile:hover{filter:brightness(1.08)}
+.tile.sel{outline:3px solid var(--focus); outline-offset:-3px; z-index:2}
+.tile b{display:block; font-size:12px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.tile i{display:block; font-style:normal; font-size:12px; font-variant-numeric:tabular-nums; opacity:.9}
+.tile.big b{font-size:14px} .tile.big i{font-size:13px}
+.tip{position:fixed; z-index:10; pointer-events:none; background:var(--surface); color:var(--ink); border:1px solid var(--line); border-radius:6px; padding:8px 10px; font-size:13px; box-shadow:0 6px 20px rgba(20,33,61,.18); max-width:260px}
+.tip b{display:block; margin-bottom:2px}
+.tip .row{display:flex; justify-content:space-between; gap:16px; color:var(--muted)}
+.tip .row span:last-child{color:var(--ink); font-variant-numeric:tabular-nums}
+
+#detail{margin-top:20px; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:16px 18px}
+#detail h2{font-size:18px; margin:0}
+#detail .meta{color:var(--muted); font-size:13px; margin:2px 0 12px}
+#detail .top{display:flex; justify-content:space-between; gap:12px; align-items:flex-start}
+#detail button.close{font:inherit; font-size:13px; background:none; border:1px solid var(--line); color:var(--ink); border-radius:6px; padding:4px 10px; cursor:pointer}
+.kv{display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:10px 20px; margin:0}
+.kv dt{font-size:12px; color:var(--muted)} .kv dd{margin:0; font-weight:700; font-variant-numeric:tabular-nums}
+.sparks{display:flex; flex-wrap:wrap; gap:16px 40px; margin-top:16px}
+.spark h3{font-size:12px; font-weight:500; color:var(--muted); margin:0 0 4px}
+.spark svg{display:block}
+
+.grid{display:grid; grid-template-columns:1fr 1fr; gap:40px; margin-top:40px}
+@media (max-width:860px){ .grid{grid-template-columns:1fr} .legend .note{margin-left:0; width:100%} }
+.panel h2{font-size:18px; margin:0 0 2px; letter-spacing:-0.01em}
+.panel .sub{color:var(--muted); font-size:13px; margin:0 0 12px}
+.panel-head{display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; margin-bottom:12px}
+
+.bars{display:grid; grid-template-columns:auto 1fr auto; gap:8px 12px; align-items:center; font-size:14px}
+.bars .lab{white-space:nowrap}
+.bars .track{position:relative; height:14px; background:linear-gradient(var(--line),var(--line)) center/1px 100% no-repeat}
+.bars .track span{position:absolute; top:0; height:14px; border-radius:2px}
+.bars .val{text-align:right; font-variant-numeric:tabular-nums; min-width:72px}
+
+.ranks{display:grid; grid-template-columns:1fr 1fr; gap:24px}
+.ranks h3{font-size:13px; font-weight:700; margin:0 0 6px}
+.ranks ol{list-style:none; margin:0; padding:0}
+.ranks li button{width:100%; display:flex; justify-content:space-between; gap:10px; font:inherit; font-size:14px; text-align:left; color:var(--ink); background:none; border:0; border-bottom:1px solid var(--line); padding:7px 0; cursor:pointer}
+.ranks li button:hover span:first-child{text-decoration:underline}
+.ranks li span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.ranks li span:last-child{font-variant-numeric:tabular-nums; white-space:nowrap; font-weight:500}
+.pos{color:var(--up)} .neg{color:var(--down)}
+@media (max-width:520px){ .ranks{grid-template-columns:1fr} }
+
+footer{margin-top:56px; padding-top:14px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; max-width:78ch}
+footer p{margin:0 0 8px}
+.err-box{padding:40px 0; color:var(--muted)}
+@media (prefers-reduced-motion:reduce){ .tile{transition:none} }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>한국 ETF 마켓맵</h1>
+      <p class="asof num" id="asof"></p>
+    </div>
+    <div class="seg" role="group" aria-label="색 기준">
+      <button type="button" data-metric="ret" aria-pressed="true">수익률</button>
+      <button type="button" data-metric="flow" aria-pressed="false">자금흐름</button>
+      <button type="button" data-metric="prem" aria-pressed="false">괴리율</button>
+    </div>
+  </header>
+  <div class="banner" id="banner" hidden>예시 데이터로 그린 화면입니다. KRX 인증키를 연결하면 실제 데이터로 바뀝니다.</div>
+
+  <div class="legend">
+    <span id="lo"></span><div class="ramp" id="ramp"></div><span id="hi"></span>
+    <span class="note" id="note"></span>
+  </div>
+  <div id="map" role="img" aria-label="자산군별 ETF 트리맵. 타일 크기는 순자산, 색은 선택한 지표"></div>
+  <div class="tip" id="tip" hidden></div>
+
+  <section id="detail" hidden></section>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>자산군별 자금흐름</h2>
+          <p class="sub num" id="flowSub"></p>
+        </div>
+        <div class="seg small" role="group" aria-label="기간" id="periods"></div>
+      </div>
+      <div class="bars" id="bars"></div>
+    </section>
+    <section class="panel">
+      <h2 id="rankTitle"></h2>
+      <p class="sub" id="rankSub"></p>
+      <div class="ranks" id="ranks"></div>
+    </section>
+  </div>
+
+  <footer>
+    <p>타일 크기는 순자산총액, 자금흐름은 전일 대비 상장좌수 변화에 당일 NAV를 곱해 추정한 설정·환매 금액입니다. 괴리율은 종가와 NAV의 차이입니다.</p>
+    <p>해외 자산 ETF는 국내 장 마감 시점과 기초자산 거래 시간이 달라 괴리율이 구조적으로 크게 나올 수 있습니다. 자산군은 종목명 기준 규칙으로 분류했습니다.</p>
+    <p>데이터: 한국거래소 KRX Open API, 매 거래일 아침 갱신.</p>
+  </footer>
+</main>
+
+<script>
+const MIN_RANK_AUM = 5e9; // 순위 목록은 순자산 50억 이상만
+const state = { metric: 'ret', period: 5, sel: null, data: null };
+const $ = s => document.querySelector(s);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const signed = (v, d) => v == null ? '-' : (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v).toFixed(d);
+const KRW = v => {
+  if (v == null || isNaN(v)) return '-';
+  const a = Math.abs(v), s = v < 0 ? '−' : '';
+  if (a >= 1e12) return s + (a / 1e12).toFixed(2) + '조';
+  if (a >= 1e8) return s + Math.round(a / 1e8).toLocaleString('ko-KR') + '억';
+  if (a >= 1e4) return s + Math.round(a / 1e4).toLocaleString('ko-KR') + '만';
+  return s + Math.round(a).toLocaleString('ko-KR');
+};
+const sKRW = v => v == null ? '-' : (v > 0 ? '+' : '') + KRW(v);
+const fdate = d => d ? `${d.slice(0,4)}.${d.slice(4,6)}.${d.slice(6)}` : '';
+
+const METRICS = {
+  ret:  { name:'일간 수익률', val:e => e.ret, dom:3, fmt:v => signed(v,2)+'%', hi:'상승', lo:'하락',
+          tile:e => signed(e.ret,2)+'%', sortKey:e => e.ret, note:'색: 전일 대비 등락률' },
+  flow: { name:'설정·환매 자금흐름', val:e => (e.flow == null || !e.aum) ? null : e.flow / e.aum * 100, dom:2,
+          fmt:v => signed(v,2)+'%', hi:'유입', lo:'유출', tile:e => sKRW(e.flow), sortKey:e => e.flow,
+          note:'색: 순자산 대비 유출입 비율' },
+  prem: { name:'괴리율', val:e => e.prem, dom:0.5, fmt:v => signed(v,3)+'%', hi:'할증', lo:'할인',
+          tile:e => signed(e.prem,2)+'%', sortKey:e => e.prem, note:'색: (종가 − NAV) ÷ NAV' }
+};
+
+function colorFor(v){
+  if (v == null || isNaN(v)) return css('--na');
+  const M = METRICS[state.metric];
+  const t = Math.max(-1, Math.min(1, v / M.dom));
+  return d3.interpolateRgb(css('--neutral'), css(t >= 0 ? '--up' : '--down'))(Math.pow(Math.abs(t), 0.75));
+}
+const textOn = bg => d3.lab(bg).l > 58 ? '#14213D' : '#FFFFFF';
+
+// ---------- 트리맵 ----------
+function renderMap(){
+  const box = $('#map'), W = box.clientWidth, H = box.clientHeight, M = METRICS[state.metric], d = state.data;
+  const cats = d.categories.filter(k => d.etfs.some(e => e.k === k));
+  const root = d3.hierarchy({ children: cats.map(k => ({ name:k, children: d.etfs.filter(e => e.k === k && e.aum > 0) })) })
+    .sum(n => n.children ? 0 : n.aum).sort((a, b) => b.value - a.value);
+  d3.treemap().size([W, H]).round(true)
+    .paddingOuter(n => n.depth === 1 ? 1 : 0)
+    .paddingTop(n => n.depth === 1 ? 20 : 0)
+    .paddingInner(n => n.depth === 0 ? 4 : 1)(root);
+
+  let html = '';
+  for (const c of root.children) {
+    html += `<div class="cat" style="left:${c.x0}px;top:${c.y0}px;width:${c.x1-c.x0}px;height:${c.y1-c.y0}px"><span>${esc(c.data.name)} <em>${KRW(c.value)}</em></span></div>`;
+  }
+  for (const l of root.leaves()) {
+    const e = l.data, w = l.x1 - l.x0, h = l.y1 - l.y0;
+    if (w < 1 || h < 1) continue;
+    const bg = colorFor(M.val(e));
+    let label = '', big = w > 150 && h > 60;
+    if (w > 62 && h > 34) label = `<b>${esc(e.n)}</b><i>${M.tile(e)}</i>`;
+    else if (w > 40 && h > 17) label = `<b>${esc(e.n)}</b>`;
+    html += `<div class="tile${big ? ' big' : ''}${state.sel === e.c ? ' sel' : ''}" data-c="${esc(e.c)}" style="left:${l.x0}px;top:${l.y0}px;width:${w}px;height:${h}px;background:${bg};color:${textOn(bg)}">${label}</div>`;
+  }
+  box.innerHTML = html;
+
+  $('#lo').textContent = `${M.lo} ${M.fmt(-M.dom).replace('−','')}`;
+  $('#hi').textContent = `${M.hi} ${M.fmt(M.dom).replace('+','')}`;
+  $('#ramp').style.background = `linear-gradient(to right, ${css('--down')}, ${css('--neutral')}, ${css('--up')})`;
+  $('#note').textContent = M.note + ', 타일 크기는 순자산';
+}
+
+// ---------- 툴팁, 선택 ----------
+const byCode = c => state.data.etfs.find(e => e.c === c);
+function tipHTML(e){
+  return `<b>${esc(e.n)}</b>
+    <div class="row"><span>순자산</span><span>${KRW(e.aum)}</span></div>
+    <div class="row"><span>수익률</span><span>${signed(e.ret,2)}%</span></div>
+    <div class="row"><span>자금흐름</span><span>${sKRW(e.flow)}</span></div>
+    <div class="row"><span>괴리율</span><span>${signed(e.prem,3)}%</span></div>`;
+}
+$('#map').addEventListener('mousemove', ev => {
+  const t = ev.target.closest('.tile'), tip = $('#tip');
+  if (!t) { tip.hidden = true; return; }
+  tip.innerHTML = tipHTML(byCode(t.dataset.c));
+  tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  let x = ev.clientX + 14, y = ev.clientY + 14;
+  if (x + r.width > innerWidth - 8) x = ev.clientX - r.width - 14;
+  if (y + r.height > innerHeight - 8) y = ev.clientY - r.height - 14;
+  tip.style.left = x + 'px'; tip.style.top = y + 'px';
+});
+$('#map').addEventListener('mouseleave', () => $('#tip').hidden = true);
+$('#map').addEventListener('click', ev => { const t = ev.target.closest('.tile'); if (t) select(t.dataset.c); });
+
+function select(code, scroll){
+  state.sel = code;
+  document.querySelectorAll('.tile.sel').forEach(t => t.classList.remove('sel'));
+  const t = document.querySelector(`.tile[data-c="${CSS.escape(code)}"]`);
+  if (t) t.classList.add('sel');
+  renderDetail();
+  if (scroll) $('#detail').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block:'nearest' });
+}
+
+function spark(values, fmt){
+  const W = 240, H = 52, pts = values.map((v, i) => [i, v]).filter(p => p[1] != null);
+  if (pts.length < 2) return '<p class="sub">데이터 부족</p>';
+  const x = d3.scaleLinear([0, values.length - 1], [2, W - 2]);
+  const ext = d3.extent(pts, p => p[1]); if (ext[0] === ext[1]) { ext[0] -= 1; ext[1] += 1; }
+  const y = d3.scaleLinear(ext, [H - 4, 4]);
+  const line = d3.line().x(p => x(p[0])).y(p => y(p[1]));
+  const zero = ext[0] < 0 && ext[1] > 0 ? `<line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="${css('--line')}"/>` : '';
+  const last = pts[pts.length - 1];
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">${zero}<path d="${line(pts)}" fill="none" stroke="${css('--ink')}" stroke-width="1.5"/><circle cx="${x(last[0])}" cy="${y(last[1])}" r="3" fill="${css('--ink')}"/></svg><div class="sub num">${fmt(pts[0][1])} → ${fmt(last[1])}</div>`;
+}
+
+function renderDetail(){
+  const box = $('#detail'), e = state.sel && byCode(state.sel);
+  if (!e) { box.hidden = true; return; }
+  const n = state.data.spark_dates.length;
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="top"><div><h2>${esc(e.n)}</h2><p class="meta num">${esc(e.c)} / ${esc(e.k)}</p></div>
+      <button class="close" type="button" id="closeDetail">닫기</button></div>
+    <dl class="kv">
+      <div><dt>순자산</dt><dd>${KRW(e.aum)}</dd></div>
+      <div><dt>종가</dt><dd>${e.close == null ? '-' : Math.round(e.close).toLocaleString('ko-KR')}</dd></div>
+      <div><dt>NAV</dt><dd>${e.nav == null ? '-' : e.nav.toLocaleString('ko-KR', {maximumFractionDigits:2})}</dd></div>
+      <div><dt>괴리율</dt><dd class="${e.prem > 0 ? 'pos' : e.prem < 0 ? 'neg' : ''}">${signed(e.prem,3)}%</dd></div>
+      <div><dt>수익률</dt><dd class="${e.ret > 0 ? 'pos' : e.ret < 0 ? 'neg' : ''}">${signed(e.ret,2)}%</dd></div>
+      <div><dt>자금흐름</dt><dd class="${e.flow > 0 ? 'pos' : e.flow < 0 ? 'neg' : ''}">${sKRW(e.flow)}</dd></div>
+      <div><dt>거래대금</dt><dd>${KRW(e.tv)}</dd></div>
+    </dl>
+    <div class="sparks">
+      <div class="spark"><h3>괴리율 최근 ${n}거래일</h3>${spark(e.sp.prem, v => signed(v,3)+'%')}</div>
+      <div class="spark"><h3>상장좌수 최근 ${n}거래일</h3>${spark(e.sp.sh, v => (v/1e4).toLocaleString('ko-KR',{maximumFractionDigits:0})+'만좌')}</div>
+    </div>`;
+  $('#closeDetail').onclick = () => { state.sel = null; document.querySelectorAll('.tile.sel').forEach(t => t.classList.remove('sel')); box.hidden = true; };
+}
+
+// ---------- 자산군 자금흐름 ----------
+function renderPeriods(){
+  const n = state.data.flows.dates.length;
+  const opts = [[1,'1일'],[5,'1주'],[20,'1개월'],[n,`전체 ${n}일`]].filter((o, i, a) => o[0] <= n && a.findIndex(p => p[0] === o[0]) === i);
+  if (!opts.some(o => o[0] === state.period)) state.period = opts[Math.min(1, opts.length - 1)][0];
+  $('#periods').innerHTML = opts.map(([v, l]) => `<button type="button" data-p="${v}" aria-pressed="${v === state.period}">${l}</button>`).join('');
+}
+function renderBars(){
+  const f = state.data.flows, n = Math.min(state.period, f.dates.length);
+  const rows = state.data.categories.map(k => ({ k, v: d3.sum((f.byCat[k] || []).slice(-n)) })).sort((a, b) => b.v - a.v);
+  const max = d3.max(rows, r => Math.abs(r.v)) || 1;
+  $('#flowSub').textContent = n ? `${fdate(f.dates[f.dates.length - n])} ~ ${fdate(f.dates[f.dates.length - 1])} 설정·환매 추정 합계` : '자금흐름을 계산할 히스토리가 없습니다.';
+  $('#bars').innerHTML = rows.map(r => {
+    const w = Math.abs(r.v) / max * 50, side = r.v >= 0 ? `left:50%;background:${css('--up')}` : `right:50%;background:${css('--down')}`;
+    return `<span class="lab">${esc(r.k)}</span><div class="track"><span style="${side};width:${w}%"></span></div><span class="val ${r.v > 0 ? 'pos' : r.v < 0 ? 'neg' : ''}">${sKRW(r.v)}</span>`;
+  }).join('');
+}
+
+// ---------- 순위 ----------
+function renderRanks(){
+  const M = METRICS[state.metric];
+  const list = state.data.etfs.filter(e => M.sortKey(e) != null && e.aum >= MIN_RANK_AUM);
+  const desc = [...list].sort((a, b) => M.sortKey(b) - M.sortKey(a));
+  const top = desc.filter(e => M.sortKey(e) > 0).slice(0, 5);
+  const bottom = desc.reverse().filter(e => M.sortKey(e) < 0).slice(0, 5);
+  $('#rankTitle').textContent = `${M.name} 상위 종목`;
+  $('#rankSub').textContent = '순자산 50억 이상 종목 기준';
+  const li = e => `<li><button type="button" data-c="${esc(e.c)}"><span>${esc(e.n)}</span><span class="${M.sortKey(e) > 0 ? 'pos' : 'neg'}">${M.tile(e)}</span></button></li>`;
+  const col = (title, arr) => `<div><h3>${title}</h3><ol>${arr.length ? arr.map(li).join('') : '<li class="sub">해당 종목 없음</li>'}</ol></div>`;
+  $('#ranks').innerHTML = col(M.hi, top) + col(M.lo, bottom);
+}
+$('#ranks').addEventListener('click', ev => { const b = ev.target.closest('button[data-c]'); if (b) select(b.dataset.c, true); });
+
+// ---------- 컨트롤 ----------
+document.querySelectorAll('[data-metric]').forEach(b => b.addEventListener('click', () => {
+  state.metric = b.dataset.metric;
+  document.querySelectorAll('[data-metric]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  renderMap(); renderRanks();
+}));
+$('#periods').addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-p]'); if (!b) return;
+  state.period = +b.dataset.p; renderPeriods(); renderBars();
+});
+
+function renderAll(){ renderMap(); renderPeriods(); renderBars(); renderRanks(); renderDetail(); }
+
+let rt;
+new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => state.data && renderMap(), 120); }).observe($('#map'));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => state.data && renderAll());
+
+fetch('data/market.json', { cache:'no-store' })
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+  .then(d => {
+    state.data = d;
+    $('#asof').textContent = `${fdate(d.asof)} 기준, ETF ${d.etfs.length.toLocaleString('ko-KR')}종목, 순자산 ${KRW(d3.sum(d.etfs, e => e.aum))}`;
+    $('#banner').hidden = !d.demo;
+    renderAll();
+  })
+  .catch(() => {
+    $('#map').innerHTML = '<p class="err-box">data/market.json을 불러오지 못했습니다. 로컬에서는 프로젝트 폴더에서 <code>python -m http.server</code>를 실행한 뒤 http://localhost:8000 으로 여세요.</p>';
+  });
+</script>
+</body>
+</html>
