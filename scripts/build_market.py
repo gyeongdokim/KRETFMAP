@@ -29,6 +29,7 @@ API = "http://data-dbg.krx.co.kr/svc/apis/etp/etf_bydd_trd"  # KRX 데이터는 
 
 KEEP_DAYS = 70   # 자금흐름 계산에 쓰는 히스토리 길이 (거래일)
 SPARK_DAYS = 20  # 종목 상세 스파크라인 길이
+PREM_LIMIT = 30.0  # 괴리율 절댓값(%)이 이보다 크면 이상치로 보고 괴리율을 비운다 (예: 거래가 막힌 러시아 ETF)
 
 # 분류 규칙: 위에서부터 먼저 걸리는 자산군으로 분류. 틀린 종목은 data/overrides.csv로 고친다.
 RULES = [
@@ -159,18 +160,23 @@ def build(hist, overrides, demo=False):
 
     cat_of = {}
     etfs = []
+    excluded = []  # 괴리율 이상치로 제외한 종목 (화면에서 안내용)
     for code, r in t_rows.items():
         cat = classify(code, r["n"], r["i"], overrides)
         cat_of[code] = cat
         if not r["aum"] or r["aum"] <= 0:
             continue
         prem = (r["close"] - r["nav"]) / r["nav"] * 100 if r["close"] and r["nav"] else None
+        if prem is not None and abs(prem) > PREM_LIMIT:
+            excluded.append({"c": code, "n": r["n"], "prem": round(prem, 2)})
+            prem = None
         flow = flow_of(r, p_rows.get(code))
         sp_prem, sp_sh = [], []
         for _, rows in spark_hist:
             x = rows.get(code)
             if x and x["close"] and x["nav"]:
-                sp_prem.append(round((x["close"] - x["nav"]) / x["nav"] * 100, 3))
+                p = (x["close"] - x["nav"]) / x["nav"] * 100
+                sp_prem.append(round(p, 3) if abs(p) <= PREM_LIMIT else None)
             else:
                 sp_prem.append(None)
             sp_sh.append(x["sh"] if x else None)
@@ -205,6 +211,8 @@ def build(hist, overrides, demo=False):
         "spark_dates": [d for d, _ in spark_hist],
         "flows": {"dates": dates, "byCat": by_cat},
         "etfs": sorted(etfs, key=lambda e: -e["aum"]),
+        "prem_limit": PREM_LIMIT,
+        "excluded": excluded,
     }
 
 
@@ -283,6 +291,8 @@ def main():
     out = DATA / "market.json"
     out.write_text(json.dumps(market, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"완료: {out} ({market['asof']}, {len(market['etfs'])}종목, 자금흐름 {len(market['flows']['dates'])}일)")
+    for e in market["excluded"]:
+        print(f"  괴리율 이상치 제외: {e['n']} ({e['prem']:+.2f}%)")
 
 
 if __name__ == "__main__":
