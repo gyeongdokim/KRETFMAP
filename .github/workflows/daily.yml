@@ -2,7 +2,7 @@ name: daily-market-data
 
 on:
   schedule:
-    - cron: "30 22 * * 0-4"   # 한국시간 평일 07:30 (KRX 데이터는 전일분까지 제공)
+    - cron: "0 1 * * 1-5"   # 한국시간 평일 10:00
   workflow_dispatch:
     inputs:
       backfill:
